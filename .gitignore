@@ -1,0 +1,16 @@
+# Private recipient data and send artifacts
+/private/
+/data/
+*.xlsx
+*.xls
+*.tsv
+sms-batch*.csv
+send-log*.json
+
+# Keep the synthetic public example
+!examples/sms-batch.example.csv
+
+# Local tooling
+.DS_Store
+Thumbs.db
+*.tmp

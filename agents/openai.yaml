@@ -1,0 +1,6 @@
+interface:
+  display_name: "Windows Phone Link SMS"
+  short_description: "Safely draft, send, and verify personalized Phone Link SMS"
+  default_prompt: "Use $windows-phonelink-sms to prepare a personalized SMS, request confirmation, send it through Phone Link, and verify the result."
+policy:
+  allow_implicit_invocation: true
