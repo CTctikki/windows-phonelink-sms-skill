@@ -26,6 +26,8 @@ Use `scripts/phone-link-sms.ps1` from this skill directory.
    `pwsh -NoProfile -File scripts/phone-link-sms.ps1 -Action send -PhoneNumber "<number>" -Message "<body>" -Confirmed`
 6. Record `sent`, `already_sent`, `sending`, `failed`, or `not_found`. `sent` means Phone Link accepted the message without a visible failure; it is not a carrier delivery receipt.
 
+For a fixed CSV batch, first run `scripts/phone-link-sms-batch.ps1 -Action preview -CsvPath <file>`. After action-time confirmation, rerun with `-Action send -Confirmed`. CSV columns are `store_name,phone_number,message`.
+
 ## Batch Rules
 
 - Confirm the fixed batch immediately before sending; never add recipients afterward.
@@ -37,3 +39,5 @@ Use `scripts/phone-link-sms.ps1` from this skill directory.
 ## Privacy
 
 Never commit real phone numbers, merchant names, message bodies, contact exports, workbooks, or send logs. Use only synthetic data in public examples.
+
+

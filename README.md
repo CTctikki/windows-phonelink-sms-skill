@@ -62,6 +62,24 @@ pwsh -NoProfile -File scripts/phone-link-sms.ps1 `
   -Message "示例短信，请勿实际发送。"
 ```
 
+### Fixed batch
+
+Preview a private CSV with columns `store_name,phone_number,message`:
+
+```powershell
+pwsh -NoProfile -File scripts/phone-link-sms-batch.ps1 `
+  -Action preview -CsvPath "C:\private\sms-batch.csv"
+```
+
+After confirming that exact fixed batch with the user:
+
+```powershell
+pwsh -NoProfile -File scripts/phone-link-sms-batch.ps1 `
+  -Action send -CsvPath "C:\private\sms-batch.csv" `
+  -Confirmed -DelaySeconds 5 -MaxMessages 20
+```
+
+The batch stops on the first unresolved or failed result.
 All commands return JSON. A `sent` result indicates no visible Phone Link failure; it does not prove carrier delivery or recipient receipt.
 
 ## Privacy and safety
@@ -75,9 +93,12 @@ All commands return JSON. A `sent` result indicates no visible Phone Link failur
 
 ```powershell
 pwsh -NoProfile -File tests/test_helpers.ps1
+pwsh -NoProfile -File tests/test_batch.ps1
 python "$env:USERPROFILE\.codex\skills\.system\skill-creator\scripts\quick_validate.py" .
 ```
 
 ## License
 
 MIT
+
+
