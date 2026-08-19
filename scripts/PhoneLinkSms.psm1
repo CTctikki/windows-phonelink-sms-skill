@@ -162,6 +162,35 @@ function Test-TargetVisible {
     return $false
 }
 
+function Save-PhoneLinkBatchResults {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    $absolute = [IO.Path]::GetFullPath($Path)
+    $parent = Split-Path -Parent $absolute
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+        throw "Result directory does not exist: $parent"
+    }
+
+    $temporary = "$absolute.tmp"
+    @($Results) | Select-Object store_name, phone_number, status, error, timestamp |
+        Export-Csv -LiteralPath $temporary -NoTypeInformation -Encoding utf8BOM
+    Move-Item -LiteralPath $temporary -Destination $absolute -Force
+    return $absolute
+}
+function Clear-PhoneLinkMessageDraft {
+    [CmdletBinding()]
+    param()
+
+    $window = Get-PhoneLinkWindow
+    $input = Find-VisibleElementByAutomationId -Window $window -AutomationId 'InputTextBox' -ControlType ([System.Windows.Automation.ControlType]::Edit)
+    if ($null -eq $input) { return $false }
+    Set-AutomationValue -Element $input -Value ''
+    return $true
+}
 function Get-PhoneLinkState {
     [CmdletBinding()]
     param()
@@ -186,6 +215,50 @@ function Get-PhoneLinkState {
     }
 }
 
+function Wait-PhoneLinkCondition {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][scriptblock]$Condition,
+        [ValidateRange(50, 120000)][int]$TimeoutMilliseconds = 8000,
+        [ValidateRange(10, 5000)][int]$PollMilliseconds = 250
+    )
+
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
+    do {
+        if (& $Condition) { return $true }
+        Start-Sleep -Milliseconds $PollMilliseconds
+    } while ([DateTime]::UtcNow -lt $deadline)
+    return $false
+}
+
+function Confirm-PhoneLinkRecipient {
+    param(
+        [Parameter(Mandatory)][string]$PhoneNumber,
+        [ValidateRange(1000, 30000)][int]$TimeoutMilliseconds = 10000
+    )
+
+    return Wait-PhoneLinkCondition -TimeoutMilliseconds $TimeoutMilliseconds -PollMilliseconds 300 -Condition {
+        $currentWindow = Get-PhoneLinkWindow
+        if (Test-TargetVisible -Window $currentWindow -PhoneNumber $PhoneNumber) { return $true }
+
+        $all = Get-PhoneLinkDescendants $currentWindow
+        foreach ($element in $all) {
+            if ($element.Current.IsOffscreen) { continue }
+            if ($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::ListItem -and
+                $element.Current.Name.StartsWith('键入数字后按 Enter', [System.StringComparison]::Ordinal)) {
+                try { Invoke-AutomationElement $element } catch { }
+                return $false
+            }
+        }
+
+        $suggestions = Find-VisibleElementByAutomationId -Window $currentWindow -AutomationId 'ContactSuggestionsBox'
+        if ($null -ne $suggestions) {
+            try { Invoke-AutomationElement $suggestions } catch { }
+        }
+        return $false
+    }
+}
+
 function Prepare-PhoneLinkSms {
     [CmdletBinding()]
     param(
@@ -200,55 +273,50 @@ function Prepare-PhoneLinkSms {
 
     if ($null -ne $conversation) {
         Invoke-AutomationElement $conversation
-        Start-Sleep -Milliseconds 900
+        $opened = Wait-PhoneLinkCondition -TimeoutMilliseconds 8000 -Condition {
+            $currentWindow = Get-PhoneLinkWindow
+            return Test-TargetVisible -Window $currentWindow -PhoneNumber $number
+        }
+        if (-not $opened) { throw 'Existing target conversation did not open.' }
     } else {
         $newMessage = Find-VisibleElementByAutomationId -Window $window -AutomationId 'NewMessageButton' -ControlType ([System.Windows.Automation.ControlType]::Button)
         if ($null -eq $newMessage) { throw 'New message button not found.' }
         Invoke-AutomationElement $newMessage
-        Start-Sleep -Milliseconds 700
+
+        $recipientReady = Wait-PhoneLinkCondition -TimeoutMilliseconds 8000 -Condition {
+            $currentWindow = Get-PhoneLinkWindow
+            $field = Find-VisibleElementByAutomationId -Window $currentWindow -AutomationId 'TextBox' -ControlType ([System.Windows.Automation.ControlType]::Edit)
+            return $null -ne $field -and $field.Current.Name -eq '收件人'
+        }
+        if (-not $recipientReady) { throw 'Recipient field did not become ready.' }
 
         $window = Get-PhoneLinkWindow
         $recipient = Find-VisibleElementByAutomationId -Window $window -AutomationId 'TextBox' -ControlType ([System.Windows.Automation.ControlType]::Edit)
-        if ($null -eq $recipient -or $recipient.Current.Name -ne '收件人') { throw 'Recipient field not found.' }
         Set-AutomationValue -Element $recipient -Value $number
+        $accepted = Confirm-PhoneLinkRecipient -PhoneNumber $number
+
+
+        if (-not $accepted) { throw 'Recipient was not accepted by Phone Link.' }
     }
 
     $window = Get-PhoneLinkWindow
+    if (-not (Test-TargetVisible -Window $window -PhoneNumber $number)) { throw 'Prepared recipient could not be verified in Phone Link.' }
+
     $messageInput = Find-VisibleElementByAutomationId -Window $window -AutomationId 'InputTextBox' -ControlType ([System.Windows.Automation.ControlType]::Edit)
     if ($null -eq $messageInput) { throw 'Message input not found.' }
     Set-AutomationValue -Element $messageInput -Value $Message
 
-    if ($null -eq $conversation) {
-        $suggestions = Find-VisibleElementByAutomationId -Window $window -AutomationId 'ContactSuggestionsBox'
-        if ($null -ne $suggestions) {
-            Invoke-AutomationElement $suggestions
-            Start-Sleep -Milliseconds 700
-        }
+    $readyToSend = Wait-PhoneLinkCondition -TimeoutMilliseconds 8000 -Condition {
+        $currentWindow = Get-PhoneLinkWindow
+        if (-not (Test-TargetVisible -Window $currentWindow -PhoneNumber $number)) { return $false }
+        $currentInput = Find-VisibleElementByAutomationId -Window $currentWindow -AutomationId 'InputTextBox' -ControlType ([System.Windows.Automation.ControlType]::Edit)
+        $currentSend = Find-VisibleElementByAutomationId -Window $currentWindow -AutomationId 'SendMessageButton' -ControlType ([System.Windows.Automation.ControlType]::Button)
+        return $null -ne $currentInput -and
+            $null -ne $currentSend -and
+            $currentSend.Current.IsEnabled -and
+            (Get-AutomationValue $currentInput) -eq $Message
     }
-
-    $window = Get-PhoneLinkWindow
-    $send = Find-VisibleElementByAutomationId -Window $window -AutomationId 'SendMessageButton' -ControlType ([System.Windows.Automation.ControlType]::Button)
-
-    if (($null -eq $send -or -not $send.Current.IsEnabled) -and -not $NoUriFallback) {
-        Start-Process (New-SmsUri -PhoneNumber $number -Message $Message)
-        Start-Sleep -Milliseconds 1200
-        $window = Get-PhoneLinkWindow
-        $messageInput = Find-VisibleElementByAutomationId -Window $window -AutomationId 'InputTextBox' -ControlType ([System.Windows.Automation.ControlType]::Edit)
-        if ($null -eq $messageInput) { throw 'Message input not found after SMS URI fallback.' }
-        Set-AutomationValue -Element $messageInput -Value $Message
-        $suggestions = Find-VisibleElementByAutomationId -Window $window -AutomationId 'ContactSuggestionsBox'
-        if ($null -ne $suggestions) {
-            Invoke-AutomationElement $suggestions
-            Start-Sleep -Milliseconds 700
-        }
-        $window = Get-PhoneLinkWindow
-        $send = Find-VisibleElementByAutomationId -Window $window -AutomationId 'SendMessageButton' -ControlType ([System.Windows.Automation.ControlType]::Button)
-    }
-
-    $messageInput = Find-VisibleElementByAutomationId -Window $window -AutomationId 'InputTextBox' -ControlType ([System.Windows.Automation.ControlType]::Edit)
-    if ($null -eq $send -or -not $send.Current.IsEnabled) { throw 'Recipient was not accepted; send button remains disabled.' }
-    if ((Get-AutomationValue $messageInput) -ne $Message) { throw 'Prepared message does not match requested message.' }
-    if (-not (Test-TargetVisible -Window $window -PhoneNumber $number)) { throw 'Prepared recipient could not be verified in Phone Link.' }
+    if (-not $readyToSend) { throw 'Prepared message did not reach a verified send-ready state.' }
 
     [pscustomobject]@{
         status = 'prepared'
@@ -259,7 +327,6 @@ function Prepare-PhoneLinkSms {
         sent = $false
     }
 }
-
 function Get-PhoneLinkSmsStatus {
     [CmdletBinding()]
     param(
@@ -350,10 +417,11 @@ Export-ModuleMember -Function @(
     'Test-CnMobileNumber',
     'Format-PhoneLinkNumber',
     'New-SmsUri',
+    'Wait-PhoneLinkCondition',
+    'Save-PhoneLinkBatchResults',
+    'Clear-PhoneLinkMessageDraft',
     'Get-PhoneLinkState',
     'Prepare-PhoneLinkSms',
     'Get-PhoneLinkSmsStatus',
     'Send-PhoneLinkSms'
 )
-
-

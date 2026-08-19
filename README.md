@@ -4,7 +4,9 @@ A reusable Codex Skill and PowerShell automation module for preparing, sending, 
 
 ## Features
 
-- Uses Windows UI Automation instead of mouse coordinates.
+- Uses Windows UI Automation instead of mouse coordinates or foreground URI fallback.
+- Waits for the target number to be visibly accepted before writing the message body.
+- Keeps the user's foreground window unchanged during normal operation.
 - Normalizes and validates mainland China mobile numbers.
 - Prepares drafts without sending.
 - Requires an explicit `-Confirmed` switch for sending.
@@ -79,7 +81,7 @@ pwsh -NoProfile -File scripts/phone-link-sms-batch.ps1 `
   -Confirmed -DelaySeconds 5 -MaxMessages 20
 ```
 
-The batch stops on the first unresolved or failed result.
+The batch stops on the first unresolved or failed result, clears any unsent body, and writes `<batch>.results.csv` after each processed row. Rerunning the same fixed batch is safe because visible identical messages are returned as `already_sent`.
 All commands return JSON. A `sent` result indicates no visible Phone Link failure; it does not prove carrier delivery or recipient receipt.
 
 ## Privacy and safety
@@ -100,5 +102,3 @@ python "$env:USERPROFILE\.codex\skills\.system\skill-creator\scripts\quick_valid
 ## License
 
 MIT
-
-

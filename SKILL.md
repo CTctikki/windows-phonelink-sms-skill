@@ -34,10 +34,10 @@ For a fixed CSV batch, first run `scripts/phone-link-sms-batch.ps1 -Action previ
 - Default to 10–20 messages per batch with a delay between sends.
 - Stop on recipient mismatch, changed text, disconnection, or the first failure.
 - Never retry `sending` automatically. The script prevents identical recipient+body duplicates when visible in Phone Link.
-- A new-recipient fallback may briefly foreground Phone Link, but automation does not move the mouse.
+- Recipient confirmation uses UI Automation state polling only; the workflow does not use URI foreground fallback or move the mouse.
+- The message body is written only after the target number is visibly accepted, preventing cross-recipient draft leakage.
+- Batch runs write a result CSV after every item and can safely resume; visible identical messages return `already_sent`.
 
 ## Privacy
 
 Never commit real phone numbers, merchant names, message bodies, contact exports, workbooks, or send logs. Use only synthetic data in public examples.
-
-
